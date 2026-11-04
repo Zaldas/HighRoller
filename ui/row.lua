@@ -154,7 +154,7 @@ function Row:render(v, x, y, s, cfg, now)
     else
         self.effect:set_font_flags(gdi.FontFlags.None)
         self.effect:set_outline_color(draw.gdiColor(COLOR_OUTLINE))
-        draw.setText(self.effect, rollData.effectText(def, value, v.level), sideX, fxY, 12 * s, COLOR_FX, outline)
+        draw.setText(self.effect, rollData.effectText(def, value, v.level, v.plus), sideX, fxY, 12 * s, COLOR_FX, outline)
     end
     self.effect:set_opacity(fade)
 

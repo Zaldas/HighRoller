@@ -15,6 +15,7 @@ local ZONE_GRACE    = 15     -- seconds after a zone packet during which nothing
 local ENTITY_MAX    = 2303   -- last entity index
 local PARTY_MAX     = 17     -- party and alliance member slots 0..17; 0 is the player
 local NO_STATUS     = 255    -- empty status icon slot
+local EQUIP_SLOTS   = 16
 
 -- GetStatusTimers(): absolute expiry in 1/60 s since the Vana'diel epoch (Unix 0x3C307D70).
 -- 0x7FFFFFFF is infinite/hidden, 0 is no timer. The uint32 wraps and is corrected on read.
@@ -42,6 +43,23 @@ local firstSeen        = {}    -- status id -> when its buff appeared; keeps row
 local zoneGraceUntil   = 0
 
 local function cacheKey(statusId) return 's' .. statusId end
+
+-- Item ids in equipment slots 0..15, 0 for empty.
+local function equippedItemIds()
+    local inv = AshitaCore:GetMemoryManager():GetInventory()
+    local ids = {}
+    for slot = 0, EQUIP_SLOTS - 1 do
+        local id = 0
+        local eq = inv:GetEquippedItem(slot)
+        local index = eq and bit.band(eq.Index, 0x00FF) or 0
+        if index > 0 then
+            local item = inv:GetContainerItem(bit.rshift(bit.band(eq.Index, 0xFF00), 8), index)
+            if item ~= nil then id = item.Id end
+        end
+        ids[slot + 1] = id
+    end
+    return ids
+end
 
 function Tracker.attachCache(cacheTable, saveFn)
     cache = cacheTable
@@ -188,10 +206,16 @@ function Tracker.onAction(e)
         lastRollByCaster[actor] = def
     end
 
+    -- The server applies Phantom Roll +N from the gear worn when the roll or Double-Up resolves;
+    -- luashitacast's swap back follows this packet
+    local plus = 0
     if actor == me then
         lastOwnStatus = def.statusId
         if anyBust then
             table.insert(busts, { key = def.key, at = socket.gettime() })
+        end
+        if myAction and SUCCESS_MSG[myAction.Message] then
+            plus = rollData.gearPlus(equippedItemIds())
         end
     end
 
@@ -202,6 +226,7 @@ function Tracker.onAction(e)
                 casterId   = actor,
                 casterName = actor == me and '' or nameForServerId(actor),
                 mine       = actor == me,
+                plus       = plus,
             })
         elseif BUST_MSG[myAction.Message] then
             setRoll(def.statusId, nil)
@@ -279,6 +304,7 @@ function Tracker.snapshot()
                 def        = def,
                 statusId   = statusId,
                 value      = known and known.value or nil,
+                plus       = known and known.plus or 0,
                 mine       = known == nil or known.mine == true,
                 casterName = known and known.casterName or '',
                 remaining  = remaining,

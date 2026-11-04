@@ -39,10 +39,57 @@ local ROLLS = {
     { 'corsair', 114, 326, "Corsair's Roll", 'Corsair', '#E0AE4C', 5, 9, { 10, 11, 11, 12, 20, 13, 15, 16, 8, 17, 24 },           -6,   'EXP',         '%', false },
 }
 
+-- Phantom Roll +1 and +2 columns, level 75 main job. A number is a flat offset from the base value
+-- at that tier; a table is the full 1..11 column. `source` per tier: 'wiki' (horizonffxi.wiki roll
+-- page, 2026-11-04) or 'estimate' (no wiki column; step taken from a roll with the same table, else
+-- the typical gap between adjacent non-lucky dice). The wiki lists the same bust penalty at every tier.
+local PLUS = {
+    ninja   = { 3, 6, source = { 'wiki', 'wiki' } },
+    hunter  = { 3, 6, source = { 'wiki', 'wiki' } },
+    chaos   = { { 31, 39, 42, 100, 49, 59, 66, 22, 69, 77, 121 },
+                { 33, 42, 45, 108, 53, 62, 71, 23, 74, 83, 131 }, source = { 'wiki', 'wiki' } },
+    magus   = { 2, 4, source = { 'estimate', 'estimate' } },
+    healer  = { { 3, 4, 11, 5, 5, 6, 2, 7, 7, 8, 13 },
+                { 4, 5, 14, 6, 6, 7, 3, 8, 8, 9, 18 }, source = { 'wiki', 'wiki' } },
+    puppet  = { 4, 8, source = { 'estimate', 'estimate' } },
+    choral  = { -4, -8, source = { 'estimate', 'estimate' } },
+    monk    = { 2, 4, source = { 'estimate', 'estimate' } },
+    beast   = { { 17, 23, 23, 53, 26, 31, 35, 12, 37, 41, 121 },
+                { 19, 26, 26, 61, 30, 35, 40, 13, 42, 47, 131 }, source = { 'wiki', 'wiki' } },
+    samurai = { 2, 4, source = { 'wiki', 'wiki' } },
+    gallant = { 4, 8, source = { 'wiki', 'wiki' } },
+    evoker  = { 0, { 1, 1, 1, 1, 3, 2, 2, 2, 1, 3, 4 }, source = { 'wiki', 'wiki' } },
+    rogue   = { 1, 2, source = { 'estimate', 'estimate' } },
+    warlock = { 1, 2, source = { 'estimate', 'estimate' } },
+    fighter = { 1, 2, source = { 'estimate', 'estimate' } },
+    drachen = { { 6, 7, 8, 16, 9, 10, 11, 4, 13, 14, 18 },
+                { 7, 8, 9, 19, 10, 11, 12, 5, 15, 16, 21 }, source = { 'wiki', 'wiki' } },
+    -- The wiki's +1 column repeats the base values; +1 here is half the wiki's +2 step, rounded down
+    wizard  = { { 8, 10, 15, 15, 37, 19, 23, 26, 5, 26, 44 },
+                { 10, 10, 17, 17, 39, 21, 25, 28, 7, 28, 46 }, source = { 'estimate', 'wiki' } },
+    corsair = { 1, 2, source = { 'estimate', 'estimate' } },
+}
+
+M.PLUS_MAX = 2
+
+-- Equipment with "Phantom Roll" +N on Horizon: item id -> N. How several pieces combine is unknown;
+-- they are summed and capped at PLUS_MAX.
+M.PLUS_GEAR = {
+    [15601] = 1,   -- Corsair's Culottes
+    [16348] = 1,   -- Corsair's Culottes +1
+}
+
 M.byKey     = {}
 M.byAbility = {}
 M.byStatus  = {}
 M.ordered   = {}
+
+local function plusColumn(base, spec)
+    if type(spec) == 'table' then return spec end
+    local out = {}
+    for i, v in ipairs(base) do out[i] = v + spec end
+    return out
+end
 
 for _, r in ipairs(ROLLS) do
     local def = {
@@ -50,10 +97,28 @@ for _, r in ipairs(ROLLS) do
         lucky = r[7], unlucky = r[8], values = r[9], bust = r[10], effect = r[11], unit = r[12],
         verified = r[13],
     }
+    local plus = PLUS[def.key]
+    def.plus       = { plusColumn(def.values, plus[1]), plusColumn(def.values, plus[2]) }
+    def.plusSource = plus.source
     M.byKey[def.key]           = def
     M.byAbility[def.abilityId] = def
     M.byStatus[def.statusId]   = def
     table.insert(M.ordered, def)
+end
+
+-- Phantom Roll +N from a list of equipped item ids.
+function M.gearPlus(itemIds)
+    local n = 0
+    for _, id in ipairs(itemIds) do
+        n = n + (M.PLUS_GEAR[id] or 0)
+    end
+    return math.min(n, M.PLUS_MAX)
+end
+
+-- Where a value at a +N tier comes from: 'wiki' for the base column, else the tier's source.
+function M.valueSource(def, plus)
+    if plus == nil or plus <= 0 then return 'wiki' end
+    return def.plusSource[math.min(plus, M.PLUS_MAX)]
 end
 
 local ROMAN = { 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI', 'XII' }
@@ -72,8 +137,11 @@ end
 
 -- The roll's bonus for a total at the caster's COR level (main or support job). The tables are
 -- level 75; Horizon scales them as floor(v75 * level / 75), which also gives the Support Job column.
-function M.amount(def, value, level)
-    local v = def and value and def.values[value]
+-- `plus` is the caster's Phantom Roll +N; nil or 0 is the base column.
+function M.amount(def, value, level, plus)
+    if def == nil or value == nil then return nil end
+    local column = (plus or 0) > 0 and def.plus[math.min(plus, M.PLUS_MAX)] or def.values
+    local v = column[value]
     if v == nil then return nil end
     level = math.min(75, level or 75)
     local scaled = math.floor(math.abs(v) * level / 75)
@@ -87,9 +155,9 @@ function M.amountText(def, value, level)
     return string.format('%s%d%s', amount >= 0 and '+' or '', amount, def.unit)
 end
 
-function M.effectText(def, value, level)
+function M.effectText(def, value, level, plus)
     if def == nil or value == nil or value < 1 or value > 11 then return '' end
-    local amount = M.amount(def, value, level)
+    local amount = M.amount(def, value, level, plus)
     if amount == nil then return '' end
     local sign = amount >= 0 and '+' or ''
     return string.format('%s %s%d%s', def.effect, sign, amount, def.unit)
