@@ -205,19 +205,9 @@ ashita.events.register('command', 'hr_command', function(e)
     elseif sub == 'key' then
         config.sheet.enabled = not config.sheet.enabled
         settings.save()
-    elseif sub == 'log' then
-        local a = Tracker.lastRawAction
-        if a == nil then
-            print(chat.header(addon.name) .. chat.message('No roll packet seen yet.'))
-        else
-            print(chat.header(addon.name) .. chat.message(string.format(
-                'Last roll packet: actor %d, ability %d, total %s, my message %s',
-                a.actor, a.abilityId, tostring(a.total), tostring(a.myMessage))))
-        end
     elseif sub == 'help' then
         print(chat.header(addon.name) .. chat.message('/hr        - Toggle settings (preview while open)'))
         print(chat.header(addon.name) .. chat.message('/hr key    - Toggle the reference key window'))
-        print(chat.header(addon.name) .. chat.message('/hr log    - Print the last roll packet seen'))
     else
         print(chat.header(addon.name) .. chat.warning('Unknown subcommand: ' .. tostring(sub)))
     end

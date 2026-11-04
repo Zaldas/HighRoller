@@ -105,7 +105,6 @@ all from moving, and each has a **Reset position** button on its tab.
 |---------|--------|
 | `/hr` or `/highroller` | Toggle the settings window |
 | `/hr key` | Toggle the reference key |
-| `/hr log` | Print the last roll packet seen |
 | `/hr help` | List commands in chat |
 
 ## License

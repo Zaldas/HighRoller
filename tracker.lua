@@ -41,8 +41,6 @@ local totals           = {}    -- status id -> longest remaining time seen since
 local firstSeen        = {}    -- status id -> when its buff appeared; keeps row order stable
 local zoneGraceUntil   = 0
 
-Tracker.lastRawAction = nil
-
 local function cacheKey(statusId) return 's' .. statusId end
 
 function Tracker.attachCache(cacheTable, saveFn)
@@ -176,25 +174,15 @@ function Tracker.onAction(e)
     end
     if def == nil then return end
 
-    local total, myAction, anySuccess, anyBust = nil, nil, false, false
+    local myAction, anySuccess, anyBust = nil, false, false
     for _, t in ipairs(act.Targets) do
         local a = t.Actions[1]
         if a then
-            if t.Id == actor then total = a.Param end
             if t.Id == me then myAction = a end
             if SUCCESS_MSG[a.Message] then anySuccess = true end
             if BUST_MSG[a.Message] then anyBust = true end
         end
     end
-    if total == nil then
-        local first = act.Targets[1].Actions[1]
-        total = first and first.Param or nil
-    end
-
-    Tracker.lastRawAction = {
-        actor = actor, abilityId = abilityId, total = total,
-        myMessage = myAction and myAction.Message or nil,
-    }
 
     if abilityId ~= rollData.ABILITY_DOUBLE_UP and anySuccess then
         lastRollByCaster[actor] = def
