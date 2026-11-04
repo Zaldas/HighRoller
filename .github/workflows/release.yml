@@ -1,0 +1,47 @@
+name: Create Release
+
+on:
+  push:
+    tags:
+      - 'v*'  # Triggers on tags like v0.1, v0.2, etc.
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Get version from tag
+        id: version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Check tag matches addon.version
+        run: |
+          ADDON_VERSION=$(sed -n "s/^addon\.version *= *'\([^']*\)'.*/\1/p" HighRoller.lua)
+          if [ "$ADDON_VERSION" != "${{ steps.version.outputs.VERSION }}" ]; then
+            echo "Tag v${{ steps.version.outputs.VERSION }} does not match addon.version '$ADDON_VERSION'"
+            exit 1
+          fi
+
+      - name: Create release zip
+        run: |
+          mkdir -p release
+          git archive HEAD --prefix=HighRoller/ | tar -xC release/
+          cd release && zip -r HighRoller.zip HighRoller && cd ..
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: HighRoller.${{ steps.version.outputs.VERSION }}
+          files: |
+            release/HighRoller.zip
+          generate_release_notes: true
+          draft: true
+          fail_on_unmatched_files: true
