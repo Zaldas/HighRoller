@@ -32,6 +32,10 @@ local BG_PAD_H_LEFT = 5     -- left overhang in the horizontal layout
 local BG_SPLIT    = 2       -- the panels meet at the separator, this far in from its strip's leading side
 local BG_MARGIN   = 5       -- vertical overhang past the separator's ends (beside layout)
 local CARD_PAST_SEP = 0.25  -- share of the attached row's last card past the separator (beside layout)
+local COLOR_OUTLINE = '#000000'
+local OUTLINE_ALPHA = 0.55  -- per copy; overlapping copies build up along the edges
+-- Black copies of each icon at these unit offsets, drawn under it
+local OUTLINE_OFFSETS = { { -1, -1 }, { 0, -1 }, { 1, -1 }, { -1, 0 }, { 1, 0 }, { -1, 1 }, { 0, 1 }, { 1, 1 } }
 
 -- Hours, then whole minutes from the threshold, else seconds
 local function recastLabel(secs, threshold)
@@ -63,8 +67,14 @@ function Mast.new(engine, tex, cfg, abilityKeys, backs)
     m.texts   = { m.tooltip }
     m.names   = {}
     for _, a in ipairs(recasts.ABILITIES) do m.names[a.key] = a.name end
-    m.icons, m.times = {}, {}
+    m.icons, m.outlines, m.times = {}, {}, {}
     for _, key in ipairs(abilityKeys) do
+        -- Sprites draw in creation order, so the outline copies come first
+        m.outlines[key] = {}
+        for i = 1, #OUTLINE_OFFSETS do
+            m.outlines[key][i] = draw.newSprite(engine, tex[key])
+            table.insert(m.sprites, m.outlines[key][i])
+        end
         m.icons[key] = draw.newSprite(engine, tex[key])
         m.times[key] = draw.newText(cfg.labelFont, 11, gdi.Alignment.Left, gdi.FontFlags.Bold)
         table.insert(m.sprites, m.icons[key])
@@ -141,6 +151,11 @@ end
 
 -- Places an ability icon and its hit box. Returns its timer text object and label; the caller positions it.
 function Mast:placeAbility(r, x, y, ctx)
+    local d = math.max(1, math.floor(ctx.s + 0.5))
+    local outlineColor = draw.argb(COLOR_OUTLINE, OUTLINE_ALPHA * (r.ready and 1 or COOL_ALPHA))
+    for i, off in ipairs(OUTLINE_OFFSETS) do
+        draw.placeIcon(self.outlines[r.key][i], x + off[1] * d, y + off[2] * d, ctx.s, outlineColor)
+    end
     draw.placeIcon(self.icons[r.key], x, y, ctx.s, self:iconColor(r.ready))
     table.insert(ctx.hits, { key = r.key, x = x, y = y, w = ICON * ctx.s, h = ICON * ctx.s })
     local label = (ctx.showTime and not r.ready) and recastLabel(r.remaining, ctx.secThresh) or ''
@@ -223,7 +238,7 @@ function Mast:renderHorizontal(list, ctx)
 
     -- Backgrounds fade up behind the rolls and down behind the icons (and the cards)
     local left = list.left - BG_PAD_H_LEFT * s
-    local right = list.x + math.max(list.w, ctx.cards and ctx.cards.w or 0) + BG_PAD * s
+    local right = list.x + math.max(ctx.empty and sepW or list.w, ctx.cards and ctx.cards.w or 0) + BG_PAD * s
     local split = math.floor(slotY + BG_SPLIT * s + 0.5)
     local backTop = list.y - BG_PAD * s
     local backBottom = contentBottom + BG_PAD * s
@@ -355,6 +370,7 @@ function Mast:render(recastList, list, s, cfg, mouse, cards)
     end
     for key, spr in pairs(self.icons) do
         spr.visible = false
+        for _, o in ipairs(self.outlines[key]) do o.visible = false end
         self.times[key]:set_visible(false)
     end
     -- Placed by the layouts only when cards are attached
@@ -390,9 +406,9 @@ function Mast:render(recastList, list, s, cfg, mouse, cards)
         self:renderVertical(list, ctx)
     end
     if empty then
+        -- No rolls: only the panels past the separator show, behind the icons and cards
         self.backs.rolls.visible = false
-        self.backs.icons.visible = false
-        self.backs.cards.visible = false
+        if #ctx.shown == 0 and cards == nil then self.backs.icons.visible = false end
     elseif detached and cards == nil then
         -- Detached, the panel past the separator only backs attached cards
         self.backs.icons.visible = false
