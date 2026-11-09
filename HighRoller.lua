@@ -79,8 +79,9 @@ settings.register('settings', 'hr_settings_update', function(s)
 end)
 
 -- The settings lib loads a new table on character change; the tracker must write to it.
-local function saveRollCache() settings.save('rollCache') end
-settings.register('rollCache', 'hr_cache_update', function(s)
+-- register() lowercases its alias while load()/save() do not; a mixed-case alias splits into two cache entries.
+local function saveRollCache() settings.save('rollcache') end
+settings.register('rollcache', 'hr_cache_update', function(s)
     if s ~= nil then Tracker.attachCache(s, saveRollCache) end
 end)
 
@@ -88,7 +89,7 @@ ashita.events.register('load', 'hr_load', function()
     -- The settings lib links missing nested tables to the defaults it is given; a copy keeps
     -- `defaults` intact for the reset buttons
     config = settings.load(defaults:copy(true))
-    Tracker.attachCache(settings.load(cacheDefaults, 'rollCache'), saveRollCache)
+    Tracker.attachCache(settings.load(cacheDefaults, 'rollcache'), saveRollCache)
     local engine, tex = Hud.init(config)
     CardRail.init(engine, tex, config)
     Sheet.init(tex)
@@ -100,7 +101,7 @@ ashita.events.register('unload', 'hr_unload', function()
     Hud.destroy()
     gdi:destroy_interface()
     settings.save()
-    settings.save('rollCache')
+    settings.save('rollcache')
 
     ashita.events.unregister('load', 'hr_load')
     ashita.events.unregister('unload', 'hr_unload')
