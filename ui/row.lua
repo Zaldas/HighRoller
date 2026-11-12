@@ -25,14 +25,14 @@ local DU_EXPIRING = 10   -- seconds left in the Double-Up window when its tag st
 local NUMERAL_NUDGE = -2
 local LABEL_NUDGE   = 5
 
-local COLOR_LUCKY   = '#7BE08A'
-local COLOR_UNLUCKY = '#EE5A4E'
+local COLOR_LUCKY   = draw.COLOR_LUCKY
+local COLOR_UNLUCKY = draw.COLOR_UNLUCKY
 local COLOR_BUST    = '#FF5A4A'
 local COLOR_BUST_OUTLINE = '#4A0806'
-local COLOR_OUTLINE = '#000000'
-local COLOR_NEUTRAL = '#C9D2E3'   -- rolls without a definition
+local COLOR_OUTLINE = draw.COLOR_OUTLINE
+local COLOR_NEUTRAL = draw.COLOR_TEXT   -- rolls without a definition
 local COLOR_FROM    = '#A9B8D4'
-local COLOR_FX      = '#E8ECF4'
+local COLOR_FX      = draw.COLOR_BRIGHT
 local COLOR_TIMER   = '#B9C4D8'
 local COLOR_EXPIRE  = '#FF7A6A'
 local COLOR_LINE    = '#FFFFFF1F'
@@ -88,8 +88,9 @@ function Row:render(v, x, y, s, cfg, now)
     local expiring  = v.remaining <= cfg.expiringThreshold
     local pulse     = 0.35 + 0.65 * (0.5 + 0.5 * math.cos(now * math.pi * 2))
     local blink     = expiring and pulse or 1
-    local fade      = v.mine and 1 or RECV_FADE
-    local outline   = math.max(1, math.floor(2 * s + 0.5))
+    local mine      = v.owner == 'mine'
+    local fade      = mine and 1 or RECV_FADE
+    local outline   = draw.outlineWidth(s)
     local rollColor = v.bust and COLOR_BUST or (def and rollData.colorFor(def, cfg) or COLOR_NEUTRAL)
     local numOff    = (cfg.numeralOffset + NUMERAL_NUDGE) * s
     local labelOff  = (cfg.labelOffset + LABEL_NUDGE) * s
@@ -99,7 +100,7 @@ function Row:render(v, x, y, s, cfg, now)
     local grad  = cfg.gradient
     local state = v.bust and 'bust' or (isLucky and 'lucky' or (isUnlucky and 'unlucky' or 'normal'))
     local pair  = grad.colors[state]
-    local size  = (v.mine and BIG_SIZE or RECV_BIG) * s
+    local size  = (mine and BIG_SIZE or RECV_BIG) * s
     self.big:set_font_flags(v.bust and bit.bor(gdi.FontFlags.Bold, gdi.FontFlags.Strikeout) or gdi.FontFlags.Bold)
     self.big:set_gradient_style(grad.style)
     self.big:set_gradient_color(draw.gdiColor(pair.to))
@@ -136,7 +137,7 @@ function Row:render(v, x, y, s, cfg, now)
         self.unlucky:set_visible(false)
     end
 
-    if not v.mine and v.casterName ~= '' then
+    if v.owner == 'other' and v.casterName ~= '' then
         draw.setText(self.from, v.casterName, cursor + 4 * s, 0, 11 * s, COLOR_FROM, outline)
         local _, fh = draw.textSize(self.from)
         self.from:set_position_y(math.floor(nameMid - fh / 2))

@@ -71,14 +71,12 @@ local function fontRow(label, key, config, ctx)
         local family = fontInputs[key][1]:match('^%s*(.-)%s*$')
         if family == '' then
             fontFeedback = { text = 'Font name cannot be empty', err = true }
+        elseif not gdi:get_font_available(family) then
+            fontFeedback = { text = family .. ' is not installed', err = true }
         else
             config[key] = family
             ctx.onFontChange()
-            if gdi:get_font_available(family) then
-                fontFeedback = { text = family .. ' applied', err = false }
-            else
-                fontFeedback = { text = family .. ' is not installed; text falls back to Arial', err = true }
-            end
+            fontFeedback = { text = family .. ' applied', err = false }
         end
     end
 end
@@ -103,7 +101,7 @@ end
 local function offsetSlider(label, key, config, settings)
     imgui.SetNextItemWidth(uiTheme.comboWidth())
     local v = { config[key] }
-    if imgui.SliderInt(string.format('%s##%s', label, key), v, -12, 12, '%d px') then
+    if imgui.SliderInt(string.format('%s##%s', label, key), v, -12, 12, '%d px', ImGuiSliderFlags_AlwaysClamp) then
         config[key] = v[1]
     end
     if imgui.IsItemDeactivatedAfterEdit() then settings.save() end
@@ -112,7 +110,7 @@ end
 local function sliderInt(label, tbl, key, min, max, fmt, settings)
     imgui.SetNextItemWidth(uiTheme.comboWidth())
     local v = { tbl[key] }
-    if imgui.SliderInt(label, v, min, max, fmt) then tbl[key] = v[1] end
+    if imgui.SliderInt(label, v, min, max, fmt, ImGuiSliderFlags_AlwaysClamp) then tbl[key] = v[1] end
     if imgui.IsItemDeactivatedAfterEdit() then settings.save() end
 end
 
@@ -136,7 +134,7 @@ local function drawPosition(config, settings)
         imgui.Indent(uiTheme.subIndent)
         imgui.SetNextItemWidth(uiTheme.comboWidth())
         local sv = { config.scale }
-        if imgui.SliderFloat('##scale', sv, 0.25, 2.5, '%.2fx') then config.scale = sv[1] end
+        if imgui.SliderFloat('##scale', sv, 0.25, 2.5, '%.2fx', ImGuiSliderFlags_AlwaysClamp) then config.scale = sv[1] end
         if imgui.IsItemDeactivatedAfterEdit() then settings.save() end
         imgui.Unindent(uiTheme.subIndent)
     end
@@ -157,7 +155,7 @@ local function drawRolls(config, settings)
     end
     imgui.SetNextItemWidth(uiTheme.comboWidth())
     local bg = { math.floor(config.backgroundOpacity * 100 + 0.5) }
-    if imgui.SliderInt('Background##bg', bg, 0, 100, '%d%%') then
+    if imgui.SliderInt('Background##bg', bg, 0, 100, '%d%%', ImGuiSliderFlags_AlwaysClamp) then
         config.backgroundOpacity = bg[1] / 100
     end
     if imgui.IsItemDeactivatedAfterEdit() then settings.save() end

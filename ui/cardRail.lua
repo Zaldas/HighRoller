@@ -40,7 +40,6 @@ local bracket = {}
 local bounds  = { x = 0, y = 0, w = 0, h = 0 }
 local hidden  = true
 local drag    = Drag.new()
-local mouse   = nil      -- last cursor position, for the card tooltip
 local tooltip = nil
 
 local function newRect(z)
@@ -158,7 +157,7 @@ function CardRail.update(counts, cfg, at)
     local cc = cfg.cards
     local s  = draw.uiScale(cfg)
     local vertical = at == nil and cc.orientation == 'v'
-    local outline = math.max(1, math.floor(2 * s + 0.5))
+    local outline = draw.outlineWidth(s)
     -- Rounded to nearest, as draw.placeRect places the mast's crossbar
     local x0, y0
     if at then
@@ -225,6 +224,7 @@ function CardRail.update(counts, cfg, at)
     end
 
     -- Card name and its Quick Draw effect under the cursor
+    local mouse = draw.hoverMouse()
     local hit = cc.tooltips and draw.hitAt(hits, mouse) or nil
     draw.showTooltip(tooltip, hit and string.format('%s Card - %s', hit.e.name, hit.e.shot), mouse, s, outline)
 
@@ -266,7 +266,6 @@ end
 
 -- Returns true when a drag ended and the anchor should be saved.
 function CardRail.handleMouse(e, cfg)
-    if e.message == 512 then mouse = { x = e.x, y = e.y } end
     return drag:handle(e, cfg.cards.anchor, bounds, cfg.lockPosition)
 end
 

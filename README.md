@@ -13,21 +13,23 @@ numbers to aim for.
 
 ## Features
 
-- **Roll list.** One row per roll on you, in the order they landed, with its total as a large
-  numeral and its bonus at that total
+- **Roll list.** One row per roll on you: your own rolls in the order they landed, then your
+  busts, then rolls from other Corsairs. Each shows its total as a large numeral and its bonus at
+  that total
 - **Lucky, unlucky and bust.** Lucky totals turn green, unlucky red, and a bust is struck
   through with **BUST!** in place of the bonus
 - **Double-Up help.** While Double-Up is open on your latest roll, the row shows a tag and that
   roll's lucky and unlucky numbers
 - **Horizon values.** Bonuses follow the Horizon roll tables and scale with the caster's
-  Corsair level, main or support job
+  Corsair level, main or support job. Your own rolls include Phantom Roll +N from the gear you
+  wear when the roll or Double-Up lands
 - **Recasts.** Icons for Phantom Roll, Double-Up, Quick Draw, Random Deal, Snake Eye, Fold and
   Wild Card that light up when ready. Abilities you don't have at your job, level and merits
   never appear
 - **Quick Draw cards.** A count for each element's card in your inventory, amber when running
   low and red when out
 - **Reference key.** A window listing every roll and card effect, the lucky and unlucky
-  numbers, and bust penalties
+  numbers, and bust penalties, at your Corsair level and the Phantom Roll +N of your latest roll
 - **Fits your screen.** Scales with your resolution, and every part can be moved, restyled or
   turned off
 
@@ -53,7 +55,8 @@ which shows sample rolls so you can position and style everything without rollin
   lucky and unlucky numbers. The tag pulses when the Double-Up window is about to close
 - **Other Corsairs.** With **Other Corsairs** on, rolls from other Corsairs are listed too,
   smaller and faded, with the caster's name. For a Corsair outside your party or alliance,
-  bonuses are shown at level 75
+  bonuses are shown at level 75. A roll whose caster is unknown is always listed, faded, with
+  **?** as its total
 
 ### Recasts
 

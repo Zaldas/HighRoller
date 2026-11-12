@@ -22,7 +22,7 @@ local TIME_H     = 14       -- timer label under an icon (horizontal layout)
 
 local COLOR_COOL  = '#8FA0C0'
 local COOL_ALPHA  = 0.35
-local COLOR_TIME  = '#C9D2E3'
+local COLOR_TIME  = draw.COLOR_TEXT
 local COLOR_SEP   = '#C9D2E3BF'
 local SEP_W       = 1
 local SEP_FADE    = 0.25    -- share of the separator's length faded at each end
@@ -32,7 +32,7 @@ local BG_PAD_H_LEFT = 5     -- left overhang in the horizontal layout
 local BG_SPLIT    = 2       -- the panels meet at the separator, this far in from its strip's leading side
 local BG_MARGIN   = 5       -- vertical overhang past the separator's ends (beside layout)
 local CARD_PAST_SEP = 0.25  -- share of the attached row's last card past the separator (beside layout)
-local COLOR_OUTLINE = '#000000'
+local COLOR_OUTLINE = draw.COLOR_OUTLINE
 local OUTLINE_ALPHA = 0.55  -- per copy; overlapping copies build up along the edges
 -- Black copies of each icon at these unit offsets, drawn under it
 local OUTLINE_OFFSETS = { { -1, -1 }, { 0, -1 }, { 1, -1 }, { -1, 0 }, { 1, 0 }, { -1, 1 }, { 0, 1 }, { 1, 1 } }
@@ -52,7 +52,8 @@ function Mast.newBackgrounds(engine, tex)
         recastsLead = draw.newSprite(engine, tex.fadeLeft) }
 end
 
-function Mast.new(engine, tex, cfg, abilityKeys, backs)
+-- An ability whose icon texture failed to load gets no slot.
+function Mast.new(engine, tex, cfg, backs)
     local m = setmetatable({}, Mast)
     m.tex = tex
     m.backs = backs
@@ -66,19 +67,22 @@ function Mast.new(engine, tex, cfg, abilityKeys, backs)
     m.tooltip = draw.newTooltip(cfg.labelFont)
     m.texts   = { m.tooltip }
     m.names   = {}
-    for _, a in ipairs(recasts.ABILITIES) do m.names[a.key] = a.name end
     m.icons, m.outlines, m.times = {}, {}, {}
-    for _, key in ipairs(abilityKeys) do
-        -- Sprites draw in creation order, so the outline copies come first
-        m.outlines[key] = {}
-        for i = 1, #OUTLINE_OFFSETS do
-            m.outlines[key][i] = draw.newSprite(engine, tex[key])
-            table.insert(m.sprites, m.outlines[key][i])
+    for _, a in ipairs(recasts.ABILITIES) do
+        local key = a.key
+        m.names[key] = a.name
+        if tex[key] ~= nil then
+            -- Sprites draw in creation order, so the outline copies come first
+            m.outlines[key] = {}
+            for i = 1, #OUTLINE_OFFSETS do
+                m.outlines[key][i] = draw.newSprite(engine, tex[key])
+                table.insert(m.sprites, m.outlines[key][i])
+            end
+            m.icons[key] = draw.newSprite(engine, tex[key])
+            m.times[key] = draw.newText(cfg.labelFont, 11, gdi.Alignment.Left, gdi.FontFlags.Bold)
+            table.insert(m.sprites, m.icons[key])
+            table.insert(m.texts, m.times[key])
         end
-        m.icons[key] = draw.newSprite(engine, tex[key])
-        m.times[key] = draw.newText(cfg.labelFont, 11, gdi.Alignment.Left, gdi.FontFlags.Bold)
-        table.insert(m.sprites, m.icons[key])
-        table.insert(m.texts, m.times[key])
     end
     m.hidden = true
     return m
@@ -351,11 +355,10 @@ local function newBox()
 end
 
 -- Lays the mast out against the roll list's box: { x, y, w, h, left }, where left is the leftmost
--- drawn numeral. `mouse` is the last cursor position ({ x, y }) or nil. `cards` ({ w, h }) reserves the
--- attached card row, or nil. With cfg.recastsDetached the rolls keep a bare separator and the icons
+-- drawn numeral. `cards` ({ w, h }) reserves the attached card row, or nil. With cfg.recastsDetached the rolls keep a bare separator and the icons
 -- render at cfg.recastAnchor. Returns the bounding box of the rolls' side, the card row's top-left
 -- (or nil), and the detached recasts' bounding box (zero-sized when attached).
-function Mast:render(recastList, list, s, cfg, mouse, cards)
+function Mast:render(recastList, list, s, cfg, cards)
     self.hidden = false
     self.readyHex = cfg.readyColor
     local enabled = cfg.showRecasts
@@ -384,7 +387,7 @@ function Mast:render(recastList, list, s, cfg, mouse, cards)
     if not empty then rollBox.grow(list.left, list.y, list.x + list.w - list.left, list.h) end
     local ctx = {
         s         = s,
-        outline   = math.max(1, math.floor(2 * s + 0.5)),
+        outline   = draw.outlineWidth(s),
         stackUp   = cfg.stack == 'up',
         empty     = empty,
         showTime  = cfg.showTimers == true,
@@ -424,6 +427,7 @@ function Mast:render(recastList, list, s, cfg, mouse, cards)
         self.backs.recastsLead.visible = false
     end
 
+    local mouse = draw.hoverMouse()
     local hit = cfg.recastTooltips and draw.hitAt(ctx.hits, mouse) or nil
     draw.showTooltip(self.tooltip, hit and self.names[hit.key], mouse, s, ctx.outline)
     return rollBox.box(), ctx.cardsAt, detachedBox.box()

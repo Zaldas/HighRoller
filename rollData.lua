@@ -16,27 +16,27 @@ M.MSG_DOUBLE_UP        = 424
 M.MSG_DOUBLE_UP_BUST   = 426
 M.MSG_DOUBLE_UP_BUST_S = 427
 
--- key, ability id, status id, name, short, colour, lucky, unlucky, values 1..11, bust penalty, effect label,
+-- key, ability id, status id, short name, colour, lucky, unlucky, values 1..11, bust penalty, effect label,
 -- unit, verified. A nil bust penalty is one the wiki does not list.
 local ROLLS = {
-    { 'ninja',   110, 322, "Ninja's Roll",   'Ninja',   '#9B8CF5', 4, 8, { 10, 13, 15, 40, 18, 20, 25, 5, 27, 30, 50 },           -15,  'Evasion',     '',  true  },
-    { 'hunter',  108, 320, "Hunter's Roll",  'Hunter',  '#A8BC5A', 4, 8, { 10, 13, 15, 40, 18, 20, 25, 5, 27, 30, 50 },           -15,  'Accuracy',    '',  true  },
-    { 'chaos',   105, 317, 'Chaos Roll',     'Chaos',   '#C2407A', 4, 8, { 29, 36, 39, 92, 45, 54, 61, 21, 64, 71, 111 },         -15,  'Attack',      '',  true  },
-    { 'magus',   113, 325, "Magus's Roll",   'Magus',   '#62B4F0', 2, 6, { 5, 20, 6, 8, 9, 3, 10, 13, 14, 15, 25 },               -5,   'M.Def',       '',  false },
-    { 'healer',  100, 312, "Healer's Roll",  'Healer',  '#F2EEE2', 3, 7, { 2, 3, 10, 4, 4, 5, 1, 6, 6, 7, 12 },                   -3,   'Heal MP',     '',  true  },
-    { 'puppet',  115, 327, 'Puppet Roll',    'Puppet',  '#DE9046', 3, 7, { 8, 16, 66, 20, 27, 35, 4, 43, 50, 58, 58 },            -8,   'Pet M.Atk',   '',  false },
-    { 'choral',  107, 319, 'Choral Roll',    'Choral',  '#EE9AD0', 2, 6, { -13, -55, -17, -20, -25, -8, -30, -35, -40, -45, -65 }, 25,  'Interrupt',   '%', false },
-    { 'monk',     99, 311, "Monk's Roll",    'Monk',    '#F4E15A', 3, 7, { 8, 10, 32, 12, 14, 16, 4, 20, 22, 24, 40 },            -11,  'Subtle Blow', '',  false },
-    { 'beast',   106, 318, 'Beast Roll',     'Beast',   '#C9A06A', 4, 8, { 15, 20, 20, 45, 22, 27, 30, 11, 32, 35, 111 },         nil,  'Pet Atk',     '',  false },
-    { 'samurai', 109, 321, 'Samurai Roll',   'Samurai', '#F07494', 2, 6, { 8, 32, 10, 12, 14, 4, 16, 20, 22, 24, 40 },            -10,  'Store TP',    '',  false },
-    { 'gallant', 104, 316, "Gallant's Roll", 'Gallant', '#BCC8DA', 3, 7, { 48, 60, 200, 72, 88, 104, 32, 120, 140, 160, 240 },    -120, 'Defense',     '',  true  },
-    { 'evoker',  112, 324, "Evoker's Roll",  'Evoker',  '#4FD8CA', 5, 9, { 1, 1, 1, 1, 3, 2, 2, 2, 1, 2, 4 },                     -1,   'Refresh',     '',  true  },
-    { 'rogue',   103, 315, "Rogue's Roll",   'Rogue',   '#C06CE8', 5, 9, { 2, 2, 3, 4, 12, 5, 6, 6, 1, 8, 19 },                   -6,   'Crit',        '%', false },
-    { 'warlock', 102, 314, "Warlock's Roll", 'Warlock', '#D45AB0', 4, 8, { 2, 3, 4, 12, 5, 6, 7, 1, 8, 9, 15 },                   -5,   'M.Acc',       '',  false },
-    { 'fighter',  98, 310, "Fighter's Roll", 'Fighter', '#FF9145', 5, 9, { 2, 2, 3, 4, 12, 5, 6, 6, 1, 9, 18 },                   -6,   'Dbl Atk',     '%', false },
-    { 'drachen', 111, 323, 'Drachen Roll',   'Drachen', '#8EC4AE', 4, 8, { 5, 6, 7, 13, 8, 9, 10, 3, 11, 12, 15 },               nil,  'Pet Acc',     '',  false },
-    { 'wizard',  101, 313, "Wizard's Roll",  'Wizard',  '#7A9CFF', 5, 9, { 7, 10, 14, 14, 35, 17, 21, 25, 3, 25, 42 },            -15,  'M.Atk',       '',  true  },
-    { 'corsair', 114, 326, "Corsair's Roll", 'Corsair', '#E0AE4C', 5, 9, { 10, 11, 11, 12, 20, 13, 15, 16, 8, 17, 24 },           -6,   'EXP',         '%', false },
+    { 'ninja',   110, 322, 'Ninja',   '#9B8CF5', 4, 8, { 10, 13, 15, 40, 18, 20, 25, 5, 27, 30, 50 },           -15,  'Evasion',     '',  true  },
+    { 'hunter',  108, 320, 'Hunter',  '#A8BC5A', 4, 8, { 10, 13, 15, 40, 18, 20, 25, 5, 27, 30, 50 },           -15,  'Accuracy',    '',  true  },
+    { 'chaos',   105, 317, 'Chaos',   '#C2407A', 4, 8, { 29, 36, 39, 92, 45, 54, 61, 21, 64, 71, 111 },         -15,  'Attack',      '',  true  },
+    { 'magus',   113, 325, 'Magus',   '#62B4F0', 2, 6, { 5, 20, 6, 8, 9, 3, 10, 13, 14, 15, 25 },               -5,   'M.Def',       '',  false },
+    { 'healer',  100, 312, 'Healer',  '#F2EEE2', 3, 7, { 2, 3, 10, 4, 4, 5, 1, 6, 6, 7, 12 },                   -3,   'Heal MP',     '',  true  },
+    { 'puppet',  115, 327, 'Puppet',  '#DE9046', 3, 7, { 8, 16, 66, 20, 27, 35, 4, 43, 50, 58, 58 },            -8,   'Pet M.Atk',   '',  false },
+    { 'choral',  107, 319, 'Choral',  '#EE9AD0', 2, 6, { -13, -55, -17, -20, -25, -8, -30, -35, -40, -45, -65 }, 25,  'Interrupt',   '%', false },
+    { 'monk',     99, 311, 'Monk',    '#F4E15A', 3, 7, { 8, 10, 32, 12, 14, 16, 4, 20, 22, 24, 40 },            -11,  'Subtle Blow', '',  false },
+    { 'beast',   106, 318, 'Beast',   '#C9A06A', 4, 8, { 15, 20, 20, 45, 22, 27, 30, 11, 32, 35, 111 },         nil,  'Pet Atk',     '',  false },
+    { 'samurai', 109, 321, 'Samurai', '#F07494', 2, 6, { 8, 32, 10, 12, 14, 4, 16, 20, 22, 24, 40 },            -10,  'Store TP',    '',  false },
+    { 'gallant', 104, 316, 'Gallant', '#BCC8DA', 3, 7, { 48, 60, 200, 72, 88, 104, 32, 120, 140, 160, 240 },    -120, 'Defense',     '',  true  },
+    { 'evoker',  112, 324, 'Evoker',  '#4FD8CA', 5, 9, { 1, 1, 1, 1, 3, 2, 2, 2, 1, 2, 4 },                     -1,   'Refresh',     '',  true  },
+    { 'rogue',   103, 315, 'Rogue',   '#C06CE8', 5, 9, { 2, 2, 3, 4, 12, 5, 6, 6, 1, 8, 19 },                   -6,   'Crit',        '%', false },
+    { 'warlock', 102, 314, 'Warlock', '#D45AB0', 4, 8, { 2, 3, 4, 12, 5, 6, 7, 1, 8, 9, 15 },                   -5,   'M.Acc',       '',  false },
+    { 'fighter',  98, 310, 'Fighter', '#FF9145', 5, 9, { 2, 2, 3, 4, 12, 5, 6, 6, 1, 9, 18 },                   -6,   'Dbl Atk',     '%', false },
+    { 'drachen', 111, 323, 'Drachen', '#8EC4AE', 4, 8, { 5, 6, 7, 13, 8, 9, 10, 3, 11, 12, 15 },               nil,  'Pet Acc',     '',  false },
+    { 'wizard',  101, 313, 'Wizard',  '#7A9CFF', 5, 9, { 7, 10, 14, 14, 35, 17, 21, 25, 3, 25, 42 },            -15,  'M.Atk',       '',  true  },
+    { 'corsair', 114, 326, 'Corsair', '#E0AE4C', 5, 9, { 10, 11, 11, 12, 20, 13, 15, 16, 8, 17, 24 },           -6,   'EXP',         '%', false },
 }
 
 -- Phantom Roll +1 and +2 columns, level 75 main job. A number is a flat offset from the base value
@@ -93,9 +93,9 @@ end
 
 for _, r in ipairs(ROLLS) do
     local def = {
-        key = r[1], abilityId = r[2], statusId = r[3], name = r[4], short = r[5], color = r[6],
-        lucky = r[7], unlucky = r[8], values = r[9], bust = r[10], effect = r[11], unit = r[12],
-        verified = r[13],
+        key = r[1], abilityId = r[2], statusId = r[3], short = r[4], color = r[5],
+        lucky = r[6], unlucky = r[7], values = r[8], bust = r[9], effect = r[10], unit = r[11],
+        verified = r[12],
     }
     local plus = PLUS[def.key]
     def.plus       = { plusColumn(def.values, plus[1]), plusColumn(def.values, plus[2]) }
@@ -149,8 +149,8 @@ function M.amount(def, value, level, plus)
 end
 
 -- The bonus alone, e.g. '+92' or '+12%'.
-function M.amountText(def, value, level)
-    local amount = M.amount(def, value, level)
+function M.amountText(def, value, level, plus)
+    local amount = M.amount(def, value, level, plus)
     if amount == nil then return '' end
     return string.format('%s%d%s', amount >= 0 and '+' or '', amount, def.unit)
 end

@@ -2,9 +2,11 @@
 -- Shared colour, text and sprite helpers. Geometry is in 1440p units; callers pass the scale.
 
 require('common')
-local d3d8 = require('d3d8')
-local gdi  = require('libs/gdifonts/include')
-local ffi  = require('ffi')
+local d3d8  = require('d3d8')
+local gdi   = require('libs/gdifonts/include')
+local ffi   = require('ffi')
+local imgui = require('imgui')
+local chat  = require('chat')
 require('win32types')
 
 ffi.cdef[[
@@ -17,7 +19,14 @@ local user32 = ffi.load('user32')
 local M = {}
 
 M.Z_TOOLTIP     = 100   -- above every other HighRoller object
-M.COLOR_TOOLTIP = '#E8ECF4'
+
+-- Colours shared by the HUD and the key
+M.COLOR_LUCKY   = '#7BE08A'
+M.COLOR_UNLUCKY = '#EE5A4E'
+M.COLOR_TEXT    = '#C9D2E3'
+M.COLOR_BRIGHT  = '#E8ECF4'
+M.COLOR_OUTLINE = '#000000'
+M.COLOR_TOOLTIP = M.COLOR_BRIGHT
 
 -- Automatic scale is screen height / 1440; cfg.scale > 0 overrides it.
 -- The resolution is read once: the client only applies a change on restart.
@@ -32,6 +41,11 @@ end
 function M.uiScale(cfg)
     if cfg.scale > 0 then return cfg.scale end
     return M.autoScale()
+end
+
+-- Text outline width at scale s.
+function M.outlineWidth(s)
+    return math.max(1, math.floor(2 * s + 0.5))
 end
 
 local rgbaCache = {}   -- hex string -> { r, g, b, a }
@@ -111,6 +125,26 @@ function M.setText(t, text, x, y, size, colorHex, outline)
     t:set_visible(text ~= '')
 end
 
+-- True while an ImGui window has the mouse; overlay hover and clicks yield to it.
+function M.uiHasMouse()
+    local io = imgui.GetIO()
+    return io ~= nil and io.WantCaptureMouse == true
+end
+
+local cursor = { x = 0, y = 0, seen = false }   -- last position from mouse-move events
+
+function M.trackMouse(e)
+    if e.message == 512 then
+        cursor.x, cursor.y, cursor.seen = e.x, e.y, true
+    end
+end
+
+-- The cursor for hover tests ({ x, y }); nil before the first move and while ImGui has the mouse.
+function M.hoverMouse()
+    if not cursor.seen or M.uiHasMouse() then return nil end
+    return cursor
+end
+
 -- First hit box ({ x, y, w, h }) under the cursor, or nil.
 function M.hitAt(hits, mouse)
     if mouse == nil then return nil end
@@ -156,9 +190,18 @@ function M.newSprite(engine, tex)
     return spr
 end
 
+local warnedTex = {}   -- paths already reported as failing to load
+
+-- Returns { tex, w, h }, or nil with a chat warning (once per path) when the file fails to load.
 function M.loadTex(engine, path)
     local tex, w, h = engine:loadImage(path)
-    if tex == nil then return nil end
+    if tex == nil then
+        if not warnedTex[path] then
+            warnedTex[path] = true
+            print(chat.header(addon.name) .. chat.warning('Could not load ' .. path))
+        end
+        return nil
+    end
     return { tex = tex, w = w, h = h }
 end
 

@@ -1,6 +1,6 @@
 -- referenceKey.lua
--- Corsair key as an ImGui window: rolls (stat, lucky/unlucky and their values at your COR level, bust penalty),
--- Quick Draw cards and their effects, and the recast icons with their abilities.
+-- Corsair key as an ImGui window: rolls (stat, lucky/unlucky and their values at your COR level and
+-- Phantom Roll +N, bust penalty), Quick Draw cards and their effects, and the recast icons with their abilities.
 
 require('common')
 local ffi      = require('ffi')
@@ -15,9 +15,9 @@ local Sheet = {}
 
 local ICON = 16
 
-local COLOR_TEXT    = '#C9D2E3'
-local COLOR_LUCKY   = '#7BE08A'
-local COLOR_UNLUCKY = '#EE5A4E'
+local COLOR_TEXT    = draw.COLOR_TEXT
+local COLOR_LUCKY   = draw.COLOR_LUCKY
+local COLOR_UNLUCKY = draw.COLOR_UNLUCKY
 local COLOR_DIM     = '#8E98AA'
 
 -- What each mast icon's ability does (LSB job_utils/corsair.lua; base LSB)
@@ -46,8 +46,25 @@ local function beginTable(id, cols)
     return imgui.BeginTable(id, cols, bit.bor(ImGuiTableFlags_SizingFixedFit, ImGuiTableFlags_RowBg))
 end
 
-local function drawRolls(cfg, level)
-    colored(COLOR_DIM, level and string.format('Values at COR level %d', level) or 'Values at level 75')
+-- Numeral and bonus in one colour; a dim '~' before the bonus marks an unverified or estimated value.
+local function valueCell(hex, numeral, amount, approx)
+    if not approx then
+        colored(hex, string.format('%s %s', numeral, amount))
+        return
+    end
+    colored(hex, numeral .. ' ')
+    imgui.SameLine(0, 0)
+    colored(COLOR_DIM, '~')
+    imgui.SameLine(0, 0)
+    colored(hex, amount)
+end
+
+local function drawRolls(cfg, level, plus)
+    local header = level and string.format('Values at COR level %d', level) or 'Values at level 75'
+    if plus > 0 then
+        header = string.format('%s, Phantom Roll +%d (last roll)', header, plus)
+    end
+    colored(COLOR_DIM, header)
     if not beginTable('##hrKeyRolls', 5) then return end
     for _, def in ipairs(rollData.ordered) do
         imgui.TableNextRow()
@@ -56,14 +73,16 @@ local function drawRolls(cfg, level)
         imgui.TableNextColumn()
         colored(COLOR_TEXT, def.effect)
         imgui.TableNextColumn()
-        colored(COLOR_LUCKY, string.format('%s %s', rollData.numeral(def.lucky, cfg.roman), rollData.amountText(def, def.lucky, level)))
+        local approx = def.verified == false or rollData.valueSource(def, plus) == 'estimate'
+        valueCell(COLOR_LUCKY, rollData.numeral(def.lucky, cfg.roman), rollData.amountText(def, def.lucky, level, plus), approx)
         imgui.TableNextColumn()
-        colored(COLOR_UNLUCKY, string.format('%s %s', rollData.numeral(def.unlucky, cfg.roman), rollData.amountText(def, def.unlucky, level)))
+        valueCell(COLOR_UNLUCKY, rollData.numeral(def.unlucky, cfg.roman), rollData.amountText(def, def.unlucky, level, plus), approx)
         imgui.TableNextColumn()
         local bust = rollData.bustText(def)
-        colored(COLOR_DIM, bust ~= '' and ('Bust ' .. bust) or '')
+        colored(COLOR_DIM, bust ~= '' and string.format('Bust %s%s', def.verified == false and '~' or '', bust) or '')
     end
     imgui.EndTable()
+    colored(COLOR_DIM, '~ unverified or estimated')
 end
 
 local function drawCards()
@@ -96,8 +115,9 @@ local function drawRecasts()
     imgui.EndTable()
 end
 
--- Draws the key window while cfg.sheet.enabled. Returns true when its close button was used.
-function Sheet.draw(cfg, level)
+-- Draws the key window while cfg.sheet.enabled; level is the player's COR level (nil: 75) and
+-- plus the Phantom Roll +N of their latest roll. Returns true when its close button was used.
+function Sheet.draw(cfg, level, plus)
     if not cfg.sheet.enabled then return false end
     local n = uiTheme.push()
     local open = { true }
@@ -106,7 +126,7 @@ function Sheet.draw(cfg, level)
         ok, err = pcall(function()
             if imgui.BeginTabBar('##hrKeyTabs') then
                 if imgui.BeginTabItem('Rolls') then
-                    drawRolls(cfg, level)
+                    drawRolls(cfg, level, plus or 0)
                     imgui.EndTabItem()
                 end
                 if imgui.BeginTabItem('Cards') then

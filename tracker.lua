@@ -1,6 +1,6 @@
 -- tracker.lua
 -- Phantom Roll state. Rows follow the roll buffs on the player; values and ownership come
--- from 0x028 roll packets and survive reloads through the rollCache settings file.
+-- from 0x028 roll packets and survive reloads through the rollcache settings file.
 
 require('common')
 local socket   = require('socket')
@@ -11,6 +11,8 @@ local Tracker = {}
 local JOB_COR       = 17
 local ABILITY_FOLD  = 178
 local PRUNE_GRACE   = 3      -- seconds a cached roll may lack its buff (packet arrives before the buff)
+local STAMP_EPSILON = 0.5    -- seconds a buff's expiry must move by to count as refreshed by a roll
+local EXPIRY_SLACK  = 5      -- seconds a cached expiry may differ from its buff's before the entry is dropped
 local ZONE_GRACE    = 15     -- seconds after a zone packet during which nothing is pruned
 local ENTITY_MAX    = 2303   -- last entity index
 local PARTY_MAX     = 17     -- party and alliance member slots 0..17; 0 is the player
@@ -32,17 +34,46 @@ local BUST_MSG = {
     [rollData.MSG_DOUBLE_UP_BUST_S] = true,
 }
 
-local cache            = nil   -- settings table: rolls['s<statusId>'] = { value, casterId, casterName, mine }
-local saveCache        = function() end
-local lastRollByCaster = {}    -- casterId -> roll def of their latest Phantom Roll
-local lastOwnStatus    = nil   -- status id of the player's latest roll (Double-Up applies to it)
-local busts            = {}    -- own busts, oldest first: { key, at, total }
-local missingSince     = {}    -- status id -> time its cached value was first seen without a buff
-local totals           = {}    -- status id -> longest remaining time seen since the last roll event
-local firstSeen        = {}    -- status id -> when its buff appeared; keeps row order stable
-local zoneGraceUntil   = 0
+-- Settings table: rolls['s<statusId>'] = { value, plus, casterId, casterName, mine, rolledAt, expiry, prevExpiry }.
+-- rolledAt is the packet time and expiry the roll buff's absolute expiry (Unix seconds); an entry
+-- whose buff expires at a different time belongs to an earlier roll and is dropped. An entry
+-- without expiry is pending: it takes the first buff expiry that differs from prevExpiry (the
+-- buff's expiry before the packet), or the first one when prevExpiry is nil.
+local cache     = nil
+local saveCache = function() end
+
+local lastRollByCaster -- casterId -> roll def of their latest Phantom Roll; the cache answers when absent
+local lastRollAt       -- casterId -> time of their latest Phantom Roll packet
+local lastOwnStatus    -- status id of the player's latest roll (Double-Up applies to it)
+local busts            -- own busts, oldest first: { key, at, total }
+local missingSince     -- status id -> time its cached value was first seen without a buff
+local totals           -- status id -> longest remaining time seen; cleared with its entry
+local firstSeen        -- status id -> when its buff appeared; keeps row order stable
+local zoneGraceUntil
+-- Read by update(), built into rows by views()
+local buffs            -- status id -> { remaining seconds, ... }
+local expiries         -- status id -> absolute expiry of its first timed buff
+local ownLevel         -- the player's COR level, nil when not COR
+local casterLevels     -- casterId -> COR level of another caster in the party
 
 local function cacheKey(statusId) return 's' .. statusId end
+
+-- Clears all state but the cache table itself.
+function Tracker.reset()
+    lastRollByCaster = {}
+    lastRollAt       = {}
+    lastOwnStatus    = nil
+    busts            = {}
+    missingSince     = {}
+    totals           = {}
+    firstSeen        = {}
+    zoneGraceUntil   = 0
+    buffs            = {}
+    expiries         = {}
+    ownLevel         = nil
+    casterLevels     = {}
+end
+Tracker.reset()
 
 -- Item ids in equipment slots 0..15, 0 for empty.
 local function equippedItemIds()
@@ -61,21 +92,118 @@ local function equippedItemIds()
     return ids
 end
 
-function Tracker.attachCache(cacheTable, saveFn)
-    cache = cacheTable
-    cache.rolls = cache.rolls or {}
-    saveCache = saveFn
+-- Phantom Roll +N from the gear worn now.
+function Tracker.ownPlus()
+    return rollData.gearPlus(equippedItemIds())
 end
 
-local function setRoll(statusId, entry)
-    if cache == nil then return end
-    cache.rolls[cacheKey(statusId)] = entry
-    missingSince[statusId] = nil
-    saveCache()
+-- Entries without an expiry (an older cache format) stay pending until their buff is seen.
+function Tracker.attachCache(cacheTable, saveFn)
+    Tracker.reset()
+    cache = cacheTable
+    saveCache = saveFn
+    if type(cache.rolls) ~= 'table' then
+        cache.rolls = {}
+    end
+    local dirty = false
+    for key, entry in pairs(cache.rolls) do
+        if type(entry) ~= 'table' then
+            cache.rolls[key] = nil
+            dirty = true
+        elseif type(entry.expiry) ~= 'number' then
+            entry.expiry = nil
+        end
+    end
+    if dirty then
+        saveCache()
+    end
 end
 
 local function getRoll(statusId)
     return cache and cache.rolls[cacheKey(statusId)] or nil
+end
+
+local function dropRoll(statusId)
+    cache.rolls[cacheKey(statusId)] = nil
+    missingSince[statusId] = nil
+    totals[statusId] = nil
+end
+
+-- Entries from an older cache format have no rolledAt and rank below every timed entry.
+local function rolledAt(entry)
+    return type(entry.rolledAt) == 'number' and entry.rolledAt or -math.huge
+end
+
+-- The caster's most recently rolled cached roll, for a Double-Up whose roll no packet showed this
+-- session. An entry older than the caster's latest roll packet belongs to an earlier roll and is skipped.
+local function latestRollOf(casterId)
+    if cache == nil then return nil end
+    local since = lastRollAt[casterId]
+    local best, latest = nil, nil
+    for key, entry in pairs(cache.rolls) do
+        local statusId = tonumber(key:sub(2))
+        local def = statusId and rollData.byStatus[statusId]
+        local at = rolledAt(entry)
+        if def and entry.casterId == casterId and (since == nil or at >= since) and (latest == nil or at > latest) then
+            best, latest = def, at
+        end
+    end
+    return best
+end
+
+-- Phantom Roll +N recorded on the player's most recently rolled cached roll; 0 without one.
+-- Gear-swap sets wear +N only while the roll resolves, so worn gear is not used.
+function Tracker.lastOwnPlus()
+    if cache == nil then return 0 end
+    local plus, latest = 0, nil
+    for _, entry in pairs(cache.rolls) do
+        local at = rolledAt(entry)
+        if entry.mine == true and (latest == nil or at > latest) then
+            plus, latest = tonumber(entry.plus) or 0, at
+        end
+    end
+    return plus
+end
+
+-- Player buffs with their remaining seconds ({ [statusId] = { remaining, ... } }) and the
+-- absolute expiry of each status's first timed buff.
+local function readPlayerBuffs(now)
+    local player = AshitaCore:GetMemoryManager():GetPlayer()
+    local icons  = player:GetStatusIcons()
+    local timers = player:GetStatusTimers()
+    local out, ends = {}, {}
+    if not icons or not timers then return out, ends end
+    local comparand = (now - VANA_EPOCH) * 60
+    for j = 1, 32 do
+        local id = icons[j]
+        if id and id > 0 and id ~= NO_STATUS then
+            local raw = timers[j]
+            local seconds = nil
+            if raw and raw ~= 0 and raw ~= TIMER_INF then
+                -- The wrap count puts the expiry less than 2^31 ticks before now; the expiry itself
+                -- depends on raw alone, so it stays constant across frames
+                local wraps = math.ceil((comparand - 2147483648 - raw) / 0x100000000)
+                local expiry = VANA_EPOCH + (raw + wraps * 0x100000000) / 60
+                seconds = expiry - now
+                ends[id] = ends[id] or expiry
+            end
+            out[id] = out[id] or {}
+            table.insert(out[id], seconds and math.max(0, seconds) or 0)
+        end
+    end
+    return out, ends
+end
+
+-- Stores a pending entry; reconcileCache stamps its expiry once the buff shows the new roll.
+local function setRoll(statusId, entry, now)
+    if cache == nil then return end
+    local _, ends = readPlayerBuffs(now)
+    entry.rolledAt   = now
+    entry.expiry     = nil
+    entry.prevExpiry = ends[statusId]
+    cache.rolls[cacheKey(statusId)] = entry
+    missingSince[statusId] = nil
+    saveCache()
 end
 
 -- 0x028 bit stream, field names and widths per XiPackets world/server/0x0028/Reversing.md.
@@ -188,7 +316,7 @@ function Tracker.onAction(e)
 
     local def = rollData.byAbility[abilityId]
     if abilityId == rollData.ABILITY_DOUBLE_UP then
-        def = lastRollByCaster[actor]
+        def = lastRollByCaster[actor] or latestRollOf(actor)
     end
     if def == nil then return end
 
@@ -202,8 +330,12 @@ function Tracker.onAction(e)
         end
     end
 
-    if abilityId ~= rollData.ABILITY_DOUBLE_UP and anySuccess then
-        lastRollByCaster[actor] = def
+    local now = socket.gettime()
+    if abilityId ~= rollData.ABILITY_DOUBLE_UP then
+        lastRollAt[actor] = now
+        if anySuccess then
+            lastRollByCaster[actor] = def
+        end
     end
 
     -- The server applies Phantom Roll +N from the gear worn when the roll or Double-Up resolves;
@@ -212,10 +344,10 @@ function Tracker.onAction(e)
     if actor == me then
         lastOwnStatus = def.statusId
         if anyBust then
-            table.insert(busts, { key = def.key, at = socket.gettime() })
+            table.insert(busts, { key = def.key, at = now })
         end
         if myAction and SUCCESS_MSG[myAction.Message] then
-            plus = rollData.gearPlus(equippedItemIds())
+            plus = Tracker.ownPlus()
         end
     end
 
@@ -227,9 +359,10 @@ function Tracker.onAction(e)
                 casterName = actor == me and '' or nameForServerId(actor),
                 mine       = actor == me,
                 plus       = plus,
-            })
-        elseif BUST_MSG[myAction.Message] then
-            setRoll(def.statusId, nil)
+            }, now)
+        elseif BUST_MSG[myAction.Message] and cache ~= nil then
+            dropRoll(def.statusId)
+            saveCache()
         end
     end
 end
@@ -243,82 +376,46 @@ function Tracker.isCorsair()
     return player ~= nil and (player:GetMainJob() == JOB_COR or player:GetSubJob() == JOB_COR)
 end
 
--- Player buffs with their remaining seconds: { [statusId] = { remaining, ... } }.
-local function readPlayerBuffs(now)
-    local player = AshitaCore:GetMemoryManager():GetPlayer()
-    local icons  = player:GetStatusIcons()
-    local timers = player:GetStatusTimers()
-    local out = {}
-    if not icons or not timers then return out end
-    local comparand = (now - VANA_EPOCH) * 60
-    for j = 1, 32 do
-        local id = icons[j]
-        if id and id > 0 and id ~= NO_STATUS then
-            local raw = timers[j]
-            local seconds = nil
-            if raw and raw ~= 0 and raw ~= TIMER_INF then
-                local ticks = raw - comparand
-                while ticks < -2147483648 do ticks = ticks + 0x100000000 end
-                seconds = math.max(0, ticks / 60)
+-- Stamps pending entries from their buff; outside the zone grace, drops entries whose buff is
+-- gone past the grace period or expires at a different time. Returns true when it removed entries.
+-- A stamp is not saved: prevExpiry reproduces it after a reload.
+local function reconcileCache(now, zoning)
+    local dirty = false
+    for key, entry in pairs(cache.rolls) do
+        local statusId = tonumber(key:sub(2))
+        local live = statusId and expiries[statusId]
+        if statusId == nil then
+            cache.rolls[key] = nil
+            dirty = true
+        elseif buffs[statusId] == nil then
+            if zoning then
+                missingSince[statusId] = nil
+            else
+                missingSince[statusId] = missingSince[statusId] or now
+                if now - missingSince[statusId] >= PRUNE_GRACE then
+                    dropRoll(statusId)
+                    dirty = true
+                end
             end
-            out[id] = out[id] or {}
-            table.insert(out[id], seconds or 0)
+        else
+            missingSince[statusId] = nil
+            -- A buff without a timer cannot be checked
+            if live ~= nil and entry.expiry == nil then
+                if entry.prevExpiry == nil or math.abs(live - entry.prevExpiry) > STAMP_EPSILON then
+                    entry.expiry, entry.prevExpiry = live, nil
+                end
+            elseif live ~= nil and not zoning and math.abs(entry.expiry - live) > EXPIRY_SLACK then
+                dropRoll(statusId)
+                dirty = true
+            end
         end
     end
-    return out
+    return dirty
 end
 
--- Builds the row list for this frame: own rolls, own busts, then rolls from other CORs.
-function Tracker.snapshot()
-    local now   = socket.gettime()
-    local buffs = readPlayerBuffs(now)
-    local own, received, bustViews = {}, {}, {}
-    local duTimers  = buffs[rollData.STATUS_DOUBLE_UP_CHANCE]
-    local duOpen    = duTimers ~= nil
-    local zoning    = now < zoneGraceUntil
-
-    -- Double-Up keeps a roll's expiry, so without a recorded latest roll (after a reload) it is the own roll expiring last
-    local duStatus = lastOwnStatus
-    if duOpen and duStatus == nil then
-        local latest = -1
-        for statusId, list in pairs(buffs) do
-            local known = rollData.byStatus[statusId] and getRoll(statusId)
-            if known and known.mine and list[1] > latest then
-                duStatus, latest = statusId, list[1]
-            end
-        end
-    end
-
-    for statusId, list in pairs(buffs) do
-        local def = rollData.byStatus[statusId]
-        if def then
-            firstSeen[statusId] = firstSeen[statusId] or now
-            local remaining = list[1]
-            local known = getRoll(statusId)
-            local total = totals[statusId]
-            if total == nil or remaining > total then
-                total = remaining
-                totals[statusId] = total
-            end
-            local view = {
-                def        = def,
-                statusId   = statusId,
-                value      = known and known.value or nil,
-                plus       = known and known.plus or 0,
-                mine       = known == nil or known.mine == true,
-                casterName = known and known.casterName or '',
-                remaining  = remaining,
-                total      = math.max(total, 1),
-            }
-            view.level = view.mine and Tracker.ownCorLevel() or casterCorLevel(known and known.casterId)
-            view.du = duOpen and view.mine and statusId == duStatus and view.value ~= nil
-            view.duRemaining = view.du and duTimers[1] or nil
-            if view.mine then table.insert(own, view) else table.insert(received, view) end
-        end
-    end
-
-    -- Busts: pair Bust buffs (longest remaining = newest) with recorded busts, oldest first.
-    -- A record younger than PRUNE_GRACE may still be waiting for its buff.
+-- Pairs Bust buffs with recorded busts and drops records whose buff is gone. A record younger than
+-- PRUNE_GRACE may still be waiting for its buff.
+local function pairBusts(now, zoning)
     local bustTimers = buffs[rollData.STATUS_BUST] or {}
     table.sort(bustTimers)
     while #busts > #bustTimers and not zoning and now - busts[1].at >= PRUNE_GRACE do
@@ -326,45 +423,102 @@ function Tracker.snapshot()
     end
     for i, remaining in ipairs(bustTimers) do
         local rec = busts[i]
-        local def = rec and rollData.byKey[rec.key] or nil
-        local total = remaining
-        if rec then
-            if rec.total == nil or remaining > rec.total then rec.total = remaining end
-            total = rec.total
-        end
-        table.insert(bustViews, {
-            def = def, statusId = rollData.STATUS_BUST, bust = true, mine = true,
-            remaining = remaining, total = math.max(total, 1),
-        })
+        if rec and (rec.total == nil or remaining > rec.total) then rec.total = remaining end
     end
+end
 
-    -- Drop cached values whose buff has been gone past the grace period
-    if cache and not zoning then
-        local dirty = false
-        for key, _ in pairs(cache.rolls) do
-            local statusId = tonumber(key:sub(2))
-            if statusId == nil then
-                cache.rolls[key] = nil
-                dirty = true
-            elseif buffs[statusId] == nil then
-                missingSince[statusId] = missingSince[statusId] or now
-                if now - missingSince[statusId] >= PRUNE_GRACE then
-                    cache.rolls[key] = nil
-                    missingSince[statusId] = nil
-                    totals[statusId] = nil
-                    dirty = true
-                end
-            else
-                missingSince[statusId] = nil
+-- Reads the player's buffs and levels for this frame, prunes and checks the cache, pairs busts.
+function Tracker.update(now)
+    buffs, expiries = readPlayerBuffs(now)
+    local zoning = now < zoneGraceUntil
+
+    ownLevel = Tracker.ownCorLevel()
+    casterLevels = {}
+    for statusId, list in pairs(buffs) do
+        if rollData.byStatus[statusId] then
+            firstSeen[statusId] = firstSeen[statusId] or now
+            if totals[statusId] == nil or list[1] > totals[statusId] then totals[statusId] = list[1] end
+            local known = getRoll(statusId)
+            if known and not known.mine and known.casterId then
+                casterLevels[known.casterId] = casterCorLevel(known.casterId)
             end
         end
-        if dirty then saveCache() end
+    end
+
+    pairBusts(now, zoning)
+    if cache and reconcileCache(now, zoning) then
+        saveCache()
     end
 
     if not zoning then
         for statusId, _ in pairs(firstSeen) do
             if buffs[statusId] == nil then firstSeen[statusId] = nil end
         end
+    end
+end
+
+-- One HUD row. owner is 'mine', 'other' or 'unknown' (a roll buff no packet was seen for).
+function Tracker.newView(def, statusId, owner, remaining, total)
+    return {
+        def        = def,
+        statusId   = statusId,
+        owner      = owner,
+        value      = nil,
+        plus       = 0,
+        level      = nil,
+        casterName = '',
+        remaining  = remaining,
+        total      = math.max(total or remaining, 1),
+        bust       = false,
+        du         = false,
+        duRemaining = nil,
+    }
+end
+
+-- The status the open Double-Up applies to: the player's latest roll, else (after a reload)
+-- the own cached roll with the latest expiry.
+local function doubleUpStatus()
+    if lastOwnStatus ~= nil then return lastOwnStatus end
+    local def = latestRollOf(localServerId())
+    return def and def.statusId
+end
+
+-- Rows for the state update() read: own rolls, own busts, then rolls from other CORs and
+-- unknown rolls. Changes no state.
+function Tracker.views()
+    local own, received, bustViews = {}, {}, {}
+    local duTimers = buffs[rollData.STATUS_DOUBLE_UP_CHANCE]
+    local duStatus = duTimers and doubleUpStatus()
+
+    for statusId, list in pairs(buffs) do
+        local def = rollData.byStatus[statusId]
+        if def then
+            local known = getRoll(statusId)
+            local owner = known == nil and 'unknown' or (known.mine == true and 'mine' or 'other')
+            local view = Tracker.newView(def, statusId, owner, list[1], totals[statusId])
+            if known then
+                view.value      = known.value
+                view.plus       = known.plus or 0
+                view.casterName = known.casterName or ''
+            end
+            if owner == 'mine' then
+                view.level = ownLevel
+            elseif owner == 'other' then
+                view.level = casterLevels[known.casterId]
+            end
+            view.du = owner == 'mine' and statusId == duStatus and view.value ~= nil
+            view.duRemaining = view.du and duTimers[1] or nil
+            if owner == 'mine' then table.insert(own, view) else table.insert(received, view) end
+        end
+    end
+
+    local bustTimers = buffs[rollData.STATUS_BUST] or {}
+    for i, remaining in ipairs(bustTimers) do
+        local rec = busts[i]
+        local view = Tracker.newView(rec and rollData.byKey[rec.key] or nil, rollData.STATUS_BUST, 'mine',
+            remaining, rec and rec.total or remaining)
+        view.bust = true
+        table.insert(bustViews, view)
     end
 
     local function byFirstSeen(a, b) return (firstSeen[a.statusId] or 0) < (firstSeen[b.statusId] or 0) end

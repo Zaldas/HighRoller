@@ -1,15 +1,17 @@
 addon.name    = 'HighRoller'
 addon.author  = 'Zaldas'
 addon.version = '0.1'
-addon.desc    = 'Corsair Phantom Roll list: totals, lucky/unlucky, durations, ability recasts.'
+addon.desc    = 'Corsair HUD: Phantom Rolls with their bonuses and timers, ability recasts, Quick Draw card counts and a reference key.'
 addon.link    = 'https://github.com/Zaldas/HighRoller'
 
 require('common')
+local socket         = require('socket')
 local settings       = require('settings')
 local chat           = require('chat')
 local gdi            = require('libs/gdifonts/include')
 local Tracker        = require('tracker')
 local Hud            = require('ui/hud')
+local draw           = require('ui/draw')
 local recasts        = require('recasts')
 local cards          = require('cards')
 local CardRail       = require('ui/cardRail')
@@ -26,7 +28,7 @@ local defaults = T{
     mast              = 'v',    -- recast icons beside ('v') or under ('h') the rolls; detached, a column or row
     recastsDetached   = false,
     recastAnchor      = T{ x = 900, y = 500 },
-    showOthers        = false,  -- rows for rolls from other Corsairs
+    showOthers        = false,  -- rows for rolls known to be from other Corsairs
     abilityDisplay    = 'dim',  -- 'dim': cooling icons dimmed; 'ready': only ready icons shown
     showTimers        = false,
     recastTooltips    = true,
@@ -66,12 +68,125 @@ local defaults = T{
 
 local cacheDefaults = T{ rolls = T{} }
 
+local STACKS   = { down = true, up = true }
+local MASTS    = { v = true, h = true }
+local DISPLAYS = { dim = true, ready = true }
+local SIDES    = { left = true, right = true, none = true }
+
+local function isBool(v)
+    return type(v) == 'boolean'
+end
+
+local function isText(v)
+    return type(v) == 'string' and v ~= ''
+end
+
+-- '#RRGGBB' or '#RRGGBBAA'
+local function isColor(v)
+    return type(v) == 'string' and (#v == 7 or #v == 9) and v:match('^#%x+$') ~= nil
+end
+
+local function inSet(set)
+    return function(v)
+        return set[v] == true
+    end
+end
+
+-- t[key] takes the default's value when check(t[key]) fails.
+local function fix(t, def, key, check)
+    if not check(t[key]) then
+        t[key] = def[key]
+    end
+end
+
+-- t[key] as a number clamped to lo..hi; the default when it is not a number.
+local function clampField(t, def, key, lo, hi, integer)
+    local v = tonumber(t[key])
+    if v == nil then
+        t[key] = def[key]
+        return
+    end
+    if integer then
+        v = math.floor(v + 0.5)
+    end
+    t[key] = math.max(lo, math.min(hi, v))
+end
+
+-- A nested table that is missing or not a table becomes a copy of the default's.
+local function subTable(t, def, key)
+    if type(t[key]) ~= 'table' then
+        t[key] = def[key]:copy(true)
+    end
+    return t[key], def[key]
+end
+
+local function anchorField(t, def, key)
+    local a, d = subTable(t, def, key)
+    a.x = tonumber(a.x) or d.x
+    a.y = tonumber(a.y) or d.y
+end
+
+-- Type-checks a loaded settings table in place; ranges match the settings window's sliders.
+local function sanitize(c)
+    local d = defaults
+    anchorField(c, d, 'anchor')
+    anchorField(c, d, 'recastAnchor')
+    for _, k in ipairs({ 'lockPosition', 'roman', 'recastsDetached', 'showOthers', 'showTimers', 'recastTooltips', 'perRollColor' }) do
+        fix(c, d, k, isBool)
+    end
+    -- 0 is automatic scale
+    local scale = tonumber(c.scale)
+    if scale == nil or scale <= 0 then
+        c.scale = 0
+    else
+        c.scale = math.max(0.25, math.min(2.5, scale))
+    end
+    clampField(c, d, 'expiringThreshold', 5, 60, true)
+    clampField(c, d, 'secondsThreshold', 60, 99, true)
+    clampField(c, d, 'backgroundOpacity', 0, 1, false)
+    clampField(c, d, 'numeralOffset', -12, 12, true)
+    clampField(c, d, 'labelOffset', -12, 12, true)
+    fix(c, d, 'stack', inSet(STACKS))
+    fix(c, d, 'mast', inSet(MASTS))
+    fix(c, d, 'abilityDisplay', inSet(DISPLAYS))
+    fix(c, d, 'readyColor', isColor)
+    fix(c, d, 'rollColor', isColor)
+    fix(c, d, 'numeralFont', isText)
+    fix(c, d, 'labelFont', isText)
+
+    local cc, dc = subTable(c, d, 'cards')
+    anchorField(cc, dc, 'anchor')
+    for _, k in ipairs({ 'enabled', 'attached', 'hideEmpty', 'tooltips' }) do
+        fix(cc, dc, k, isBool)
+    end
+    fix(cc, dc, 'orientation', inSet(MASTS))
+    fix(cc, dc, 'side', inSet(SIDES))
+
+    local sc, ds = subTable(c, d, 'sheet')
+    fix(sc, ds, 'enabled', isBool)
+
+    local shown, dshown = subTable(c, d, 'showRecasts')
+    for k in pairs(dshown) do
+        fix(shown, dshown, k, isBool)
+    end
+
+    local g, dg = subTable(c, d, 'gradient')
+    clampField(g, dg, 'style', 0, 8, true)
+    local colors, dcolors = subTable(g, dg, 'colors')
+    for state in pairs(dcolors) do
+        local pair, dpair = subTable(colors, dcolors, state)
+        fix(pair, dpair, 'from', isColor)
+        fix(pair, dpair, 'to', isColor)
+    end
+end
+
 local config      = defaults
 local initialized = false
 
 settings.register('settings', 'hr_settings_update', function(s)
     if s == nil then return end
     config = s
+    sanitize(config)
     if initialized then
         Hud.setFonts(config)
         CardRail.setFonts(config)
@@ -89,7 +204,8 @@ ashita.events.register('load', 'hr_load', function()
     -- The settings lib links missing nested tables to the defaults it is given; a copy keeps
     -- `defaults` intact for the reset buttons
     config = settings.load(defaults:copy(true))
-    Tracker.attachCache(settings.load(cacheDefaults, 'rollcache'), saveRollCache)
+    sanitize(config)
+    Tracker.attachCache(settings.load(cacheDefaults:copy(true), 'rollcache'), saveRollCache)
     local engine, tex = Hud.init(config)
     CardRail.init(engine, tex, config)
     Sheet.init(tex)
@@ -119,16 +235,40 @@ ashita.events.register('packet_in', 'hr_packet_in', function(e)
     end
 end)
 
+local settingsCtx = {
+    onFontChange = function()
+        Hud.setFonts(config)
+        CardRail.setFonts(config)
+        settings.save()
+    end,
+    onResetAnchor = function()
+        config.anchor.x = defaults.anchor.x
+        config.anchor.y = defaults.anchor.y
+        settings.save()
+    end,
+    onResetRecastAnchor = function()
+        config.recastAnchor.x = defaults.recastAnchor.x
+        config.recastAnchor.y = defaults.recastAnchor.y
+        settings.save()
+    end,
+    onResetCardsAnchor = function()
+        config.cards.anchor.x = defaults.cards.anchor.x
+        config.cards.anchor.y = defaults.cards.anchor.y
+        settings.save()
+    end,
+}
+
 local function isZoning()
     local player = AshitaCore:GetMemoryManager():GetPlayer()
     return player ~= nil and player:GetIsZoning() ~= 0
 end
 
+-- Own rolls, busts and rolls of unknown origin; with showOthers, also rolls from other Corsairs.
 local function shownViews(views)
     if config.showOthers then return views end
     local out = {}
     for _, v in ipairs(views) do
-        if v.mine then table.insert(out, v) end
+        if v.owner ~= 'other' then table.insert(out, v) end
     end
     return out
 end
@@ -149,7 +289,8 @@ ashita.events.register('d3d_present', 'hr_d3d_present', function()
     if not zoning and preview then
         cardsAt = Hud.update(shownViews(Hud.previewViews()), Hud.previewRecasts(), config, cardRow)
     elseif not zoning and Tracker.isCorsair() then
-        cardsAt = Hud.update(shownViews(Tracker.snapshot()), recasts.snapshot(), config, cardRow)
+        Tracker.update(socket.gettime())
+        cardsAt = Hud.update(shownViews(Tracker.views()), recasts.snapshot(), config, cardRow)
     else
         Hud.hideAll()
     end
@@ -163,34 +304,14 @@ ashita.events.register('d3d_present', 'hr_d3d_present', function()
     end
 
     if not zoning and (preview or Tracker.isCorsair()) then
-        if Sheet.draw(config, Tracker.ownCorLevel()) then settings.save() end
+        if Sheet.draw(config, Tracker.ownCorLevel(), Tracker.lastOwnPlus()) then settings.save() end
     end
 
-    SettingsWindow.draw(config, settings, {
-        onFontChange  = function()
-            Hud.setFonts(config)
-            CardRail.setFonts(config)
-            settings.save()
-        end,
-        onResetAnchor = function()
-            config.anchor.x = defaults.anchor.x
-            config.anchor.y = defaults.anchor.y
-            settings.save()
-        end,
-        onResetRecastAnchor = function()
-            config.recastAnchor.x = defaults.recastAnchor.x
-            config.recastAnchor.y = defaults.recastAnchor.y
-            settings.save()
-        end,
-        onResetCardsAnchor = function()
-            config.cards.anchor.x = defaults.cards.anchor.x
-            config.cards.anchor.y = defaults.cards.anchor.y
-            settings.save()
-        end,
-    })
+    SettingsWindow.draw(config, settings, settingsCtx)
 end)
 
 ashita.events.register('mouse', 'hr_mouse', function(e)
+    draw.trackMouse(e)
     if CardRail.handleMouse(e, config) then settings.save() end
     if Hud.handleMouse(e, config) then settings.save() end
 end)
