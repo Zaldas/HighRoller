@@ -39,7 +39,8 @@ function M.counts()
     for _, e in ipairs(M.ELEMENTS) do fresh[e.key] = 0 end
     local inv = AshitaCore:GetMemoryManager():GetInventory()
     if inv ~= nil then
-        for i = 1, inv:GetContainerCountMax(INVENTORY) do
+        -- CountMax is bag size + 1 (index 0 is gil), so items sit at 1..CountMax-1.
+        for i = 1, inv:GetContainerCountMax(INVENTORY) - 1 do
             local item = inv:GetContainerItem(INVENTORY, i)
             local key = item and byItem[item.Id]
             if key then fresh[key] = fresh[key] + item.Count end
